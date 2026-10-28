@@ -1,4 +1,5 @@
 import pickle
+from copy import deepcopy
 from typing import Annotated, Any
 
 import pytest
@@ -324,6 +325,59 @@ def test_copy_deep_extra(copy_method):
 class NotDeepCopyable:
     def __deepcopy__(self, memo):
         raise TypeError('This object cannot be deepcopied')
+
+
+@pytest.mark.parametrize('copy_model', [deepcopy, lambda model: model.model_copy(deep=True)])
+def test_deepcopy_preserves_self_reference(copy_model) -> None:
+    """https://github.com/pydantic/pydantic/issues/14093"""
+
+    class Node(BaseModel):
+        child: 'Node | None' = None
+
+    original = Node()
+    original.child = original
+
+    copied = copy_model(original)
+
+    assert copied is not original
+    assert copied.child is copied
+    assert original.child is original
+
+
+def test_model_copy_deep_update_preserves_self_reference() -> None:
+    """https://github.com/pydantic/pydantic/issues/14093"""
+
+    class Node(BaseModel):
+        child: 'Node | None' = None
+        value: int = 1
+
+    original = Node()
+    original.child = original
+
+    copied = original.model_copy(deep=True, update={'value': 2})
+
+    assert copied is not original
+    assert copied.child is copied
+    assert copied.value == 2
+    assert original.value == 1
+
+
+def test_model_copy_deep_preserves_shared_attributes() -> None:
+    """https://github.com/pydantic/pydantic/issues/14093"""
+
+    class Model(BaseModel, extra='allow'):
+        value: list[int]
+        _private: list[int] = PrivateAttr()
+
+    original = Model(value=[1, 2])
+    original.extra = original.value
+    original._private = original.value
+
+    copied = original.model_copy(deep=True)
+
+    assert copied.value is not original.value
+    assert copied.value is copied.extra
+    assert copied.value is copied._private
 
 
 def test_model_copy_deep_update_skips_deepcopy_of_updated_fields() -> None:
